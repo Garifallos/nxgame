@@ -141,6 +141,29 @@ html,body{
   letter-spacing:2px;
 }
 .overlay.hidden{display:none}
+
+/* ===== RULE TEXT UI ===== */
+.rule-text{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  font-size:22px;
+  letter-spacing:4px;
+  color:#fff;
+  text-shadow:0 0 12px rgba(255,255,255,.85);
+  opacity:0;
+  pointer-events:none;
+  z-index:80;
+}
+.rule-text.show{
+  animation: rulePop 1.2s ease;
+}
+@keyframes rulePop{
+  0%{opacity:0; transform:translate(-50%,-50%) scale(.6)}
+  30%{opacity:1; transform:translate(-50%,-50%) scale(1.1)}
+  100%{opacity:0; transform:translate(-50%,-50%) scale(1)}
+}
 </style>
 </head>
 
@@ -148,7 +171,6 @@ html,body{
 <div class="frame">
   <div class="game" id="game">
 
-    <!-- ✅ ΜΟΝΟ ΕΝΑ HUD (unique ids) -->
     <div class="ui">
       SCORE <span id="score">0</span>
       <span style="margin:0 32px"></span>
@@ -161,6 +183,9 @@ html,body{
     <div class="lane" id="lane2" style="top:240px"></div>
 
     <div class="player" id="player"></div>
+
+    <!-- Rule text -->
+    <div class="rule-text" id="ruleText"></div>
 
     <div class="overlay" id="overlay">
       <div>← → MOVE<br>SPACE CROSS<br><small>CLICK TO START / RESTART</small></div>
@@ -176,6 +201,7 @@ const overlay = document.getElementById("overlay");
 const scoreEl = document.getElementById("score");
 const bestEl  = document.getElementById("best");
 const timerEl = document.getElementById("timer");
+const ruleText = document.getElementById("ruleText");
 
 const BASE_X = 189, BASE_Y = 450;
 const LEFT = -175, RIGHT = 175;
@@ -188,18 +214,23 @@ let timerMax = 3, timer = timerMax;
 let last = 0;
 let animating = false;
 
-// ✅ slow-mo vars
+// slow-mo
 let timeScale = 1;
 let slowMoTimer = 0;
+
+// rule system
+let activeRule = null;
+let ruleTimer = 0;
 
 let bestScore = Number(localStorage.getItem("bestScore")) || 0;
 bestEl.textContent = bestScore;
 
 const keys = { left:false, right:false };
 
+const baseSpeeds = [80, -110];
 const lanes = [
-  { el: document.getElementById("lane1"), y:170, speed:  80, blocks:[] },
-  { el: document.getElementById("lane2"), y:240, speed: -110, blocks:[] }
+  { el: document.getElementById("lane1"), y:170, speed: 80, blocks:[] },
+  { el: document.getElementById("lane2"), y:240, speed:-110, blocks:[] }
 ];
 
 function screenShake(){
@@ -210,10 +241,8 @@ function screenShake(){
 function spawnBlocks(lane){
   lane.blocks = [];
   lane.el.innerHTML = "";
-
   let x = -100;
-  const GAP = 170; // λίγο μεγαλύτερο spacing (ρύθμισέ το)
-
+  const GAP = 170;
   while(x < 420){
     const b = document.createElement("div");
     b.className = "block";
@@ -224,14 +253,52 @@ function spawnBlocks(lane){
   }
 }
 
+/* ===== RULES ===== */
+function showRuleText(rule){
+  const map = {
+    reverse: "REVERSE",
+    speed: "SPEED UP",
+    chaos: "CHAOS"
+  };
+  ruleText.textContent = map[rule];
+  ruleText.classList.add("show");
+  setTimeout(()=>ruleText.classList.remove("show"), 1200);
+}
+
+function activateRule(){
+  const rules = ["reverse","speed","chaos"];
+  activeRule = rules[Math.floor(Math.random()*rules.length)];
+  ruleTimer = 3.5;
+
+  if(activeRule === "reverse"){
+    lanes.forEach(l => l.speed *= -1);
+  }
+  if(activeRule === "speed"){
+    lanes.forEach(l => l.speed *= 1.6);
+  }
+  if(activeRule === "chaos"){
+    lanes.forEach(l=>{
+      const dir = Math.random()<0.5?-1:1;
+      l.speed = dir * (60 + Math.random()*160);
+    });
+  }
+  showRuleText(activeRule);
+}
+
+function deactivateRule(){
+  activeRule = null;
+  lanes.forEach((l,i)=> l.speed = baseSpeeds[i]);
+}
+
 function start(){
   alive = true;
   started = true;
 
-  // ✅ reset states ώστε να μην “κολλάει” σε 2ο try
   animating = false;
   timeScale = 1;
   slowMoTimer = 0;
+  activeRule = null;
+  ruleTimer = 0;
 
   overlay.classList.add("hidden");
 
@@ -255,7 +322,6 @@ function die(){
   if(!alive) return;
   alive = false;
 
-  // update best
   if(score > bestScore){
     bestScore = score;
     localStorage.setItem("bestScore", bestScore);
@@ -269,7 +335,6 @@ function die(){
 function tryCross(){
   if(!alive || animating) return;
 
-  // ✅ slow motion burst on SPACE
   timeScale = 0.35;
   slowMoTimer = 0.18;
 
@@ -278,11 +343,9 @@ function tryCross(){
 
   function a(t){
     if(!alive) return;
-
     const p = Math.min(1, (t - S) / D);
     const eased = p < 0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
     py = -330 * eased;
-
     player.style.transform = `translate(${px}px,${py}px)`;
 
     if(p < 1){
@@ -290,10 +353,13 @@ function tryCross(){
       return;
     }
 
-    // success
     score++;
     scoreEl.textContent = score;
     timer = timerMax;
+
+    if(score % 5 === 0){
+      activateRule();
+    }
 
     py = 0;
     animating = false;
@@ -304,41 +370,33 @@ function tryCross(){
 function loop(t){
   if(!alive) return;
 
-  // base dt
   let dt = (t - last) / 1000;
   last = t;
-
-  // apply timeScale
   dt *= timeScale;
 
-  // slow-mo countdown (με dt scaled για ωραίο feel)
   if(slowMoTimer > 0){
     slowMoTimer -= dt;
-    if(slowMoTimer <= 0){
-      timeScale = 1;
-    }
+    if(slowMoTimer <= 0) timeScale = 1;
   }
 
-  // timer
+  if(activeRule){
+    ruleTimer -= dt;
+    if(ruleTimer <= 0) deactivateRule();
+  }
+
   timer -= dt;
   const ratio = Math.max(0, timer / timerMax);
   timerEl.style.width = (ratio * 100) + "%";
   if(ratio < 0.20) timerEl.classList.add("low");
   else timerEl.classList.remove("low");
 
-  if(timer <= 0){
-    die();
-    return;
-  }
+  if(timer <= 0){ die(); return; }
 
-  // movement
   if(keys.left)  px -= SPEED * dt;
   if(keys.right) px += SPEED * dt;
   px = Math.max(LEFT, Math.min(RIGHT, px));
-
   player.style.transform = `translate(${px}px,${py}px)`;
 
-  // move blocks + collision
   const pxC = BASE_X + px + 11;
   const pyC = BASE_Y + py + 11;
 
@@ -346,15 +404,12 @@ function loop(t){
     l.blocks.forEach(b=>{
       let x = parseFloat(b.style.left);
       x += l.speed * dt;
-
       if(x > 420)  x = -120;
       if(x < -120) x = 420;
-
       b.style.left = x + "px";
 
       const bx = x + 40;
       const by = l.y + 24;
-
       if(Math.abs(bx - pxC) < 40 && Math.abs(by - pyC) < 20){
         die();
       }
@@ -367,7 +422,6 @@ function loop(t){
 window.addEventListener("keydown", e=>{
   if(e.code === "ArrowLeft")  keys.left = true;
   if(e.code === "ArrowRight") keys.right = true;
-
   if(e.code === "Space"){
     if(!started) start();
     else tryCross();
@@ -379,10 +433,7 @@ window.addEventListener("keyup", e=>{
   if(e.code === "ArrowRight") keys.right = false;
 });
 
-overlay.addEventListener("click", ()=>{
-  // restart clean (χωρίς reload)
-  start();
-});
+overlay.addEventListener("click", ()=> start());
 </script>
 </body>
 </html>
