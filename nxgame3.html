@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<title>NX CROSSY TIMER</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+:root{
+  --bg:#050607;
+  --panel:#070809;
+  --nx:#6aff6a;
+  --danger:#ff3b3b;
+  --muted:rgba(234,255,234,.65);
+}
+
+html,body{
+  margin:0;height:100%;
+  background:var(--bg);
+  display:grid;place-items:center;
+  font-family:system-ui,Arial;
+  color:#eaffea;
+}
+
+.frame{
+  width:400px;height:640px;
+  padding:10px;
+  border-radius:18px;
+  background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.18));
+  box-shadow:0 20px 60px rgba(0,0,0,.65);
+}
+
+.game{
+  width:100%;height:100%;
+  position:relative;
+  overflow:hidden;
+  border-radius:14px;
+  background:var(--panel);
+  will-change:transform;
+}
+
+/* Screen shake */
+.game.shake{
+  animation: shake .25s linear;
+}
+@keyframes shake{
+  0%{transform:translate(0,0)}
+  20%{transform:translate(-6px,4px)}
+  40%{transform:translate(6px,-4px)}
+  60%{transform:translate(-4px,3px)}
+  80%{transform:translate(4px,-3px)}
+  100%{transform:translate(0,0)}
+}
+
+.ui{
+  position:absolute;
+  top:12px;
+  left:0; right:0;
+  text-align:center;
+  font-size:12px;
+  letter-spacing:3px;
+  color:#9bff9b;
+  z-index:50;
+  text-shadow:0 0 6px rgba(106,255,106,.6);
+}
+
+.timerbar{
+  position:absolute;top:38px;left:20px;
+  width:360px;height:8px;
+  background:rgba(255,255,255,.08);
+  border-radius:999px;
+  overflow:hidden;
+  z-index:50;
+}
+
+.timer{
+  height:100%;
+  width:100%;
+  background:linear-gradient(90deg,#6aff6a,#b6ffb6);
+  transition: width .1s linear, filter .2s ease;
+}
+.timer.low{
+  background:linear-gradient(90deg,#ff6a6a,#ff3b3b);
+  filter: drop-shadow(0 0 6px rgba(255,60,60,.8));
+}
+
+.lane{
+  position:absolute;
+  width:100%;
+  height:48px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255,255,255,.05) 0 20px,
+      rgba(255,255,255,0) 20px 40px
+    ),
+    #141617;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.06),
+    inset 0 12px 18px rgba(0,0,0,.6);
+  overflow:hidden;
+}
+
+.block{
+  position:absolute;
+  width:80px;
+  height:30px;
+  top:9px;
+  background:linear-gradient(180deg,#ff4b4b,#c81d1d);
+  border-radius:8px;
+  box-shadow:
+    inset 0 -3px 0 rgba(0,0,0,.35),
+    0 6px 16px rgba(0,0,0,.4);
+}
+
+.player{
+  position:absolute;
+  width:22px;
+  height:22px;
+  background:linear-gradient(180deg,#6aff6a,#2fdc6a);
+  top:450px;
+  left:189px;
+  border-radius:6px;
+  box-shadow:
+    0 0 12px rgba(106,255,106,.9),
+    0 0 30px rgba(106,255,106,.35);
+  z-index:40;
+  transition: box-shadow .15s ease;
+}
+
+.overlay{
+  position:absolute;
+  inset:0;
+  background:radial-gradient(circle at center, rgba(0,0,0,.6), rgba(0,0,0,.95));
+  display:grid;
+  place-items:center;
+  cursor:pointer;
+  z-index:60;
+  text-align:center;
+  font-size:14px;
+  letter-spacing:2px;
+}
+.overlay.hidden{display:none}
+</style>
+</head>
+
+<body>
+<div class="frame">
+  <div class="game" id="game">
+
+    <!-- ✅ ΜΟΝΟ ΕΝΑ HUD (unique ids) -->
+    <div class="ui">
+      SCORE <span id="score">0</span>
+      <span style="margin:0 32px"></span>
+      BEST <span id="best">0</span>
+    </div>
+
+    <div class="timerbar"><div class="timer" id="timer"></div></div>
+
+    <div class="lane" id="lane1" style="top:170px"></div>
+    <div class="lane" id="lane2" style="top:240px"></div>
+
+    <div class="player" id="player"></div>
+
+    <div class="overlay" id="overlay">
+      <div>← → MOVE<br>SPACE CROSS<br><small>CLICK TO START / RESTART</small></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const game = document.getElementById("game");
+const player = document.getElementById("player");
+const overlay = document.getElementById("overlay");
+const scoreEl = document.getElementById("score");
+const bestEl  = document.getElementById("best");
+const timerEl = document.getElementById("timer");
+
+const BASE_X = 189, BASE_Y = 450;
+const LEFT = -175, RIGHT = 175;
+const SPEED = 360;
+
+let alive = false, started = false;
+let px = 0, py = 0;
+let score = 0;
+let timerMax = 3, timer = timerMax;
+let last = 0;
+let animating = false;
+
+// ✅ slow-mo vars
+let timeScale = 1;
+let slowMoTimer = 0;
+
+let bestScore = Number(localStorage.getItem("bestScore")) || 0;
+bestEl.textContent = bestScore;
+
+const keys = { left:false, right:false };
+
+const lanes = [
+  { el: document.getElementById("lane1"), y:170, speed:  80, blocks:[] },
+  { el: document.getElementById("lane2"), y:240, speed: -110, blocks:[] }
+];
+
+function screenShake(){
+  game.classList.add("shake");
+  setTimeout(()=>game.classList.remove("shake"), 250);
+}
+
+function spawnBlocks(lane){
+  lane.blocks = [];
+  lane.el.innerHTML = "";
+
+  let x = -100;
+  const GAP = 170; // λίγο μεγαλύτερο spacing (ρύθμισέ το)
+
+  while(x < 420){
+    const b = document.createElement("div");
+    b.className = "block";
+    b.style.left = x + "px";
+    lane.el.appendChild(b);
+    lane.blocks.push(b);
+    x += 80 + GAP;
+  }
+}
+
+function start(){
+  alive = true;
+  started = true;
+
+  // ✅ reset states ώστε να μην “κολλάει” σε 2ο try
+  animating = false;
+  timeScale = 1;
+  slowMoTimer = 0;
+
+  overlay.classList.add("hidden");
+
+  score = 0;
+  scoreEl.textContent = score;
+
+  timer = timerMax;
+  timerEl.style.width = "100%";
+  timerEl.classList.remove("low");
+
+  px = 0; py = 0;
+  player.style.transform = `translate(${px}px,${py}px)`;
+
+  lanes.forEach(spawnBlocks);
+
+  last = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function die(){
+  if(!alive) return;
+  alive = false;
+
+  // update best
+  if(score > bestScore){
+    bestScore = score;
+    localStorage.setItem("bestScore", bestScore);
+    bestEl.textContent = bestScore;
+  }
+
+  screenShake();
+  overlay.classList.remove("hidden");
+}
+
+function tryCross(){
+  if(!alive || animating) return;
+
+  // ✅ slow motion burst on SPACE
+  timeScale = 0.35;
+  slowMoTimer = 0.18;
+
+  animating = true;
+  const D = 520, S = performance.now();
+
+  function a(t){
+    if(!alive) return;
+
+    const p = Math.min(1, (t - S) / D);
+    const eased = p < 0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
+    py = -330 * eased;
+
+    player.style.transform = `translate(${px}px,${py}px)`;
+
+    if(p < 1){
+      requestAnimationFrame(a);
+      return;
+    }
+
+    // success
+    score++;
+    scoreEl.textContent = score;
+    timer = timerMax;
+
+    py = 0;
+    animating = false;
+  }
+  requestAnimationFrame(a);
+}
+
+function loop(t){
+  if(!alive) return;
+
+  // base dt
+  let dt = (t - last) / 1000;
+  last = t;
+
+  // apply timeScale
+  dt *= timeScale;
+
+  // slow-mo countdown (με dt scaled για ωραίο feel)
+  if(slowMoTimer > 0){
+    slowMoTimer -= dt;
+    if(slowMoTimer <= 0){
+      timeScale = 1;
+    }
+  }
+
+  // timer
+  timer -= dt;
+  const ratio = Math.max(0, timer / timerMax);
+  timerEl.style.width = (ratio * 100) + "%";
+  if(ratio < 0.20) timerEl.classList.add("low");
+  else timerEl.classList.remove("low");
+
+  if(timer <= 0){
+    die();
+    return;
+  }
+
+  // movement
+  if(keys.left)  px -= SPEED * dt;
+  if(keys.right) px += SPEED * dt;
+  px = Math.max(LEFT, Math.min(RIGHT, px));
+
+  player.style.transform = `translate(${px}px,${py}px)`;
+
+  // move blocks + collision
+  const pxC = BASE_X + px + 11;
+  const pyC = BASE_Y + py + 11;
+
+  lanes.forEach(l=>{
+    l.blocks.forEach(b=>{
+      let x = parseFloat(b.style.left);
+      x += l.speed * dt;
+
+      if(x > 420)  x = -120;
+      if(x < -120) x = 420;
+
+      b.style.left = x + "px";
+
+      const bx = x + 40;
+      const by = l.y + 24;
+
+      if(Math.abs(bx - pxC) < 40 && Math.abs(by - pyC) < 20){
+        die();
+      }
+    });
+  });
+
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener("keydown", e=>{
+  if(e.code === "ArrowLeft")  keys.left = true;
+  if(e.code === "ArrowRight") keys.right = true;
+
+  if(e.code === "Space"){
+    if(!started) start();
+    else tryCross();
+  }
+});
+
+window.addEventListener("keyup", e=>{
+  if(e.code === "ArrowLeft")  keys.left = false;
+  if(e.code === "ArrowRight") keys.right = false;
+});
+
+overlay.addEventListener("click", ()=>{
+  // restart clean (χωρίς reload)
+  start();
+});
+</script>
+</body>
+</html>
