@@ -222,7 +222,8 @@ let slowMoTimer = 0;
 let activeRule = null;
 let ruleTimer = 0;
 
-let bestScore = Number(localStorage.getItem("bestScore")) || 0;
+let bestScore = Number(sessionStorage.getItem("bestScore")) || 0;
+
 bestEl.textContent = bestScore;
 
 const keys = { left:false, right:false };
@@ -324,7 +325,7 @@ function die(){
 
   if(score > bestScore){
     bestScore = score;
-    localStorage.setItem("bestScore", bestScore);
+    sessionStorage.setItem("bestScore", bestScore);
     bestEl.textContent = bestScore;
   }
 
@@ -434,6 +435,11 @@ window.addEventListener("keyup", e=>{
 });
 
 overlay.addEventListener("click", ()=> start());
+
+window.addEventListener("beforeunload", () => {
+  localStorage.removeItem("bestScore");
+});
+
 </script>
 </body>
 </html>
